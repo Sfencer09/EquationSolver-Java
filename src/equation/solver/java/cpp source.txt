@@ -1,0 +1,2561 @@
+// equation solver test.cpp : Defines the entry point for the console application.
+
+/*
+This program was designed to solve rational equations. My goal is to expand it to support many other types of equations, adding to it as I learn new concepts in school and elsewhere.
+
+So far, I have mainly tested to make sure that it has functionality, and neglected testing it to make sure it is foolproof. Because of this, I need people to do their best to try and
+	crash my program by entering all kinds of inputs. If you do find a bug, send me an email at treystevens00@gmail.com that says what you entered for the input, what your error message is,
+	the source code that you're using, and a brief overview of your computer's software (compiler name and version you're using to compile the code, OS name and version) so that I can fix it
+	as easily as possible.
+
+Additionally, I have begun porting the program into Java. I will continue to update this version alongside the Java version, however primary development will be in Java until the port is complete.
+*/
+
+#define _CRT_SECURE_NO_WARNINGS
+
+#include "stdafx.h"
+#include "stdlib.h"
+#include "string.h"
+#include "math.h"
+#include "time.h"
+
+#define is_square(num) (((int) pow((long double) ((int) sqrt((long double) num)), 2)) == num)
+#define is_cube(num) (((int) pow((long double) ((int) cbrt((long double) num)), 3)) == num)
+#define is_even(num) (num%2==0?1:0)
+#define is_negative(num) (num>0?0:1)
+#define max(num1, num2) (num1>num2?num1:num2)
+#define min(num1, num2) (num1<num2?num1:num2)
+#define sign_mult(num) (num>=0?1:-1)
+
+#define DEBUG_LEVEL 0
+#define LOGGING_LEVEL 1
+
+#define FIND_ZEROS
+
+//#define LONG_POLYS_SUPPORTED
+//#define SUPPORTS_EQUALS
+//#define MULTI_VAR_SUPPORTED
+
+//TO DO: add boolean property variables to structures to prevent duplicate testing of inherent properties, such as whether it's factored, whether it is a full equation or just an expression, etc.
+struct monomial
+{
+	int coefficient;
+	int exponent;
+};
+struct polynomial
+{
+	int num_elements;
+	struct monomial *elements[1];
+};
+struct poly_n_d
+{
+	int num_elements;
+	struct polynomial *elements[1];
+};
+struct polynomial_fraction
+{
+	struct poly_n_d *numerator;
+	struct poly_n_d *denominator;
+};
+struct expression
+{
+	int num_elements;
+	struct polynomial_fraction *elements[1];
+};
+struct equation
+{
+	struct expression *left_side;
+	struct expression *right_side;
+};
+
+struct fraction
+{
+	int numerator;
+	int denominator;
+};
+
+FILE *log_file;
+
+struct monomial *garbage_mono[100000];
+struct polynomial *garbage_poly[10000];
+struct poly_n_d *garbage_poly_n_d[10000];
+struct polynomial_fraction *garbage_poly_fract[100];
+struct expression *garbage_expression[100];
+struct equation *garbage_equation[10];
+struct fraction *garbage_fraction[100];
+int num_mono = 0;
+int num_poly = 0;
+int num_poly_n_d = 0;
+int num_poly_fract = 0;
+int num_expression = 0;
+int num_equation = 0;
+int num_fraction = 0;
+void free_garbage_mono(void)
+{
+	for(int i=0; i<num_mono; i++)
+	{
+		free(garbage_mono[i]);
+		garbage_mono[i] = NULL;
+	}
+	num_mono = 0;
+}
+void free_garbage_poly(void)
+{
+	for (int i=0; i<num_poly; i++)
+	{
+		free(garbage_poly[i]);
+		garbage_poly[i] = NULL;
+	}
+	num_poly = 0;
+}
+void free_garbage_poly_n_d(void)
+{
+	for(int i=0; i<num_poly_n_d; i++)
+	{
+		free(garbage_poly_n_d[i]);
+		garbage_poly_n_d[i] = NULL;
+	}
+	num_poly_n_d = 0;
+}
+void free_garbage_poly_fract(void)
+{
+	for(int i=0; i<num_poly_fract; i++)
+	{
+		free(garbage_poly_fract[i]);
+		garbage_poly_fract[i] = NULL;
+	}
+	num_poly_fract = 0;
+}
+void free_garbage_expression(void)
+{
+	for(int i=0; i<num_expression; i++)
+	{
+		free(garbage_expression[i]);
+		garbage_expression[i] = NULL;
+	}
+	num_expression = 0;
+}
+void free_garbage_equation(void)
+{
+	for(int i=0; i<num_equation; i++)
+	{
+		free(garbage_equation[i]);
+		garbage_equation[i] = NULL;
+	}
+	num_equation = 0;
+}
+void free_garbage_fraction(void)
+{
+	for(int i=0; i<num_fraction; i++)
+	{
+		free(garbage_fraction[i]);
+		garbage_fraction[i] = NULL;
+	}
+	num_fraction = 0;
+}
+void garbage_collect(void)
+{
+	free_garbage_mono();
+	free_garbage_poly();
+	free_garbage_poly_n_d();
+	free_garbage_poly_fract();
+	free_garbage_expression();
+	free_garbage_equation();
+	free_garbage_fraction();
+}
+
+void close_log(void)
+{
+	fclose(log_file);
+}
+
+
+double cbrt(double num, double precision);
+double cbrt(double num);
+long double n_root(long double num, int root);
+int gcf(int num_1, int num_2);
+
+struct fraction *to_fract(double input);
+
+struct monomial *new_mono(void);
+struct polynomial *new_poly(int num_elements);
+struct poly_n_d *new_poly_n_d(int num_elements);
+struct polynomial_fraction *new_poly_fract(void);
+struct expression *new_expression(int num_elements);
+
+struct polynomial *simplify(struct polynomial *poly);
+
+void sort_elements(struct polynomial *input);
+void sort_elements(struct poly_n_d *input);
+void sort_elements(struct polynomial_fraction *input);
+void sort_elements(struct expression *input);
+struct polynomial *poly_size_fit(struct polynomial *poly);
+
+struct polynomial *mono_to_poly(struct monomial *mono);
+struct poly_n_d *poly_to_poly_n_d(struct polynomial *poly);
+struct polynomial_fraction *poly_n_d_to_poly_fract(struct poly_n_d *input);
+struct expression *poly_fract_to_expression(struct polynomial_fraction *poly_fract);
+
+struct polynomial *poly_add_elements(struct polynomial *input, int num_to_add);
+struct poly_n_d *poly_n_d_add_elements(struct poly_n_d *input, int num_to_add);
+struct expression *expression_add_elements(struct expression *input, int num_to_add);
+
+struct polynomial *poly_remove_element(struct polynomial *input, int element_index);
+struct poly_n_d *poly_n_d_remove_element(struct poly_n_d *input, int element_index);
+struct expression *expression_remove_element(struct expression *input, int element_index);
+
+struct polynomial *copy(struct polynomial *source);
+struct poly_n_d *copy(struct poly_n_d *source);
+struct polynomial_fraction *copy(struct polynomial_fraction *source);
+struct expression *copy(struct expression *source);
+struct poly_n_d *poly_n_d_merge(struct poly_n_d *input_1, struct poly_n_d *input_2);
+
+int first_factorable(struct poly_n_d *input);
+bool can_factor_bi(struct polynomial *input);
+bool can_factor_tri(struct polynomial *input);
+bool can_factor(struct polynomial *input);
+
+double compare(struct polynomial *poly_1, struct polynomial *poly_2);
+
+struct polynomial *add(struct monomial *mono_1, struct monomial *mono_2);
+struct monomial *mult(struct monomial *mono_1, struct monomial *mono_2);
+struct polynomial *add(struct polynomial *poly_1, struct polynomial *poly_2);
+struct polynomial *mult(struct polynomial *poly_1, struct polynomial *poly_2);
+struct polynomial_fraction *add(struct polynomial_fraction *fract_1, struct polynomial_fraction *fract_2);
+struct expression *add(struct expression *input);
+struct poly_n_d *distribute(struct poly_n_d *input);
+
+struct poly_n_d *factor(struct poly_n_d *input);
+struct poly_n_d *factor(struct polynomial *poly);
+struct polynomial_fraction *factor(struct polynomial_fraction *input);
+struct expression *factor(struct expression *input);
+struct equation *factor(struct equation *input);
+
+double val(struct monomial *input, double x);
+double val(struct polynomial *input, double x);
+double val(struct poly_n_d *input, double x);
+double val(struct polynomial_fraction *input, double x);
+double val(struct expression *input, double x);
+
+double **find_zeros(struct expression *input);
+double **find_holes(struct expression *input);
+//double **find_asymptotes(struct expression *input);
+
+void print(struct monomial *mono);
+void print(struct polynomial *poly);
+void print(struct poly_n_d *input);
+void print(struct polynomial_fraction *input);
+void print(struct expression *input);
+void print(struct equation *input);
+
+void print_fraction(struct fraction *input);
+
+void print_zeros(double **zeros);
+
+void debug_print(struct monomial *input);
+void debug_print(struct polynomial *input);
+void debug_print(struct poly_n_d *input);
+void debug_print(struct polynomial_fraction *input);
+void debug_print(struct expression *input);
+void debug_print(struct equation *input);
+
+void log_debug_print(struct monomial *input);
+void log_debug_print(struct polynomial *input);
+void log_debug_print(struct poly_n_d *input);
+void log_debug_print(struct polynomial_fraction *input);
+void log_debug_print(struct expression *input);
+void log_debug_print(struct equation *input);
+
+void log_print(struct monomial *mono);
+void log_print(struct polynomial *poly);
+void log_print(struct poly_n_d *input);
+void log_print(struct polynomial_fraction *input);
+void log_print(struct expression *input);
+void log_print(struct equation *input);
+
+void log_time(void);
+
+void get_input(char *input_str);
+struct equation *parse_input(char input_str[]);
+
+void show_help(void);
+void show_about(void);
+
+
+char variable_char = 0;
+struct tm *curr_time;
+
+
+int _tmain(int argc, _TCHAR* argv[])
+{
+	atexit(garbage_collect);
+	atexit(close_log);
+	struct equation *input;
+	char input_str[201];
+	for(int i=0; ((log_file = fopen("LogFile.txt", "w")) == NULL) && i<3; i++) //tries 3 times to open a file stream for logging
+		;
+	if(log_file == NULL) //failed to open file stream
+	{
+		printf("Could not create log file, likely due to access restrictions.\n Try moving program file to a different directory with public access.");
+		getchar();
+		return 0;
+	}
+	char* log_buff = (char*) malloc(100);
+	setvbuf(log_file, log_buff, _IONBF, 100);
+	printf("Enter an equation to solve, or one of the following commands:\n"
+		" quit - exits the program smoothly\n"
+		" about - displays information about the program and author\n"
+		" help - displays help on how to enter an equation to solve\n\n");
+	while(true)
+	{
+		get_input(input_str);
+		input = parse_input(input_str);
+		printf("\n");
+
+		debug_print(input);
+#ifdef FIND_ZEROS
+		double **zeros = find_zeros(input->left_side);
+		print_zeros(zeros);
+#else
+		input = factor(input);
+#endif
+		print(input);
+
+		garbage_collect();
+	}
+	return 0;
+}
+
+
+
+double cbrt(double num, double precision)
+{
+	long double x = num;
+	while((x*x*x)-num>precision)
+	{
+		x = (1/ (long double) 3) * ((num / (x*x)) + (2*x));
+	}
+	return x;
+}
+double cbrt(double num)
+{
+	double prev_x = 0;
+	double x = 0;
+	double increment = sign_mult(num);
+	for(x = 0 ; x < num + 1; x+=increment)
+	{
+		if(x == prev_x)
+			continue;
+		if(x*x*x == num)
+			return x;
+		else if((pow(prev_x, 3) < num && pow(x, 3) > num) || (pow(prev_x, 3) > num && pow(x, 3) < num))
+			increment *= -0.1;
+		prev_x = x;
+	}
+	return x;
+}
+long double n_root(long double num, int root)
+{
+	if(root == 0)
+		return 1;
+	else if(root == 1)
+		return num;
+	else if(root == 2)
+		return sqrtl(num);
+	else if(root == 3)
+		return cbrt(num);
+
+	long double x = num / 2;
+
+	while(num != powl(x, root))
+	{
+		x = (x + (num / powl(x, root-1))) / 2;
+	}
+
+	return x;
+}
+int gcf(int num_1, int num_2)
+{
+	for(int i=max(num_1, num_2); i>=1; i--)
+		if(num_1 % i == 0 && num_2 % i == 0)
+			return i;
+	return 1;
+}
+int lcm(int num_1, int num_2)
+{
+	if(is_negative(num_1) || is_negative(num_2))
+		return -1;
+	for(int i=1; i<num_1*num_2; i++)
+		if((i % num_1 == 0) && (i % num_2 == 0))
+			return i;
+	return num_1 * num_2;
+}
+
+struct fraction *to_fract(double input)
+{
+	struct fraction *result = (fraction *) malloc(sizeof(struct fraction));
+	garbage_fraction[num_fraction++] = result;
+
+	int int_part = (int) input;
+	double dec_part = abs(input - int_part);
+	while(result->numerator / result->denominator != dec_part)
+	{
+		if(result->numerator / result->denominator < dec_part)
+			result->numerator++;
+		else
+			result->denominator++;
+	}
+
+	return result;
+}
+
+struct monomial *new_mono(void)
+{
+	struct monomial *temp_mono;
+	while((temp_mono = (monomial *) malloc(sizeof(struct monomial))) == NULL)
+		;
+	temp_mono->coefficient = 0;
+	temp_mono->exponent = 0;
+	garbage_mono[num_mono++] = temp_mono;
+	return temp_mono;
+}
+struct polynomial *new_poly(int num_elements)
+{
+	struct polynomial *temp_poly;
+	while((temp_poly = (polynomial *) malloc(sizeof(struct polynomial) + ((num_elements-1) * sizeof(monomial *)))) == NULL)
+		;
+	temp_poly->num_elements = num_elements;
+	for(int i=0; i<num_elements; i++)
+		temp_poly->elements[i] = new_mono();
+	garbage_poly[num_poly++] = temp_poly;
+	return temp_poly;
+}
+struct poly_n_d *new_poly_n_d(int num_elements)
+{
+	struct poly_n_d *temp_poly_n_d;
+	while((temp_poly_n_d = (poly_n_d *) malloc(sizeof(struct poly_n_d) + ((num_elements-1) * sizeof(polynomial *)))) == NULL)
+		;
+	temp_poly_n_d->num_elements = num_elements;
+	for(int i=0; i<num_elements; i++)
+		temp_poly_n_d->elements[i] = new_poly(1);
+	garbage_poly_n_d[num_poly_n_d++] = temp_poly_n_d;
+	return temp_poly_n_d;
+}
+struct polynomial_fraction *new_poly_fract(void)
+{
+	struct polynomial_fraction *temp_poly_fract;
+	while((temp_poly_fract = (polynomial_fraction *) malloc(sizeof(struct polynomial_fraction))) == NULL);
+	temp_poly_fract->denominator = new_poly_n_d(1);
+	temp_poly_fract->numerator = new_poly_n_d(1);
+	temp_poly_fract->denominator->elements[0]->elements[0]->coefficient = 1;
+	garbage_poly_fract[num_poly_fract++] = temp_poly_fract;
+	return temp_poly_fract;
+}
+struct expression *new_expression(int num_elements)
+{
+	struct expression *temp_expression;
+	while((temp_expression = (expression *) malloc(sizeof(struct expression) + ((num_elements - 1) * sizeof(polynomial_fraction *)))) == NULL)
+		;
+	temp_expression->num_elements = num_elements;
+	for(int i=0; i<num_elements; i++)
+		temp_expression->elements[i] = new_poly_fract();
+	garbage_expression[num_expression++] = temp_expression;
+	return temp_expression;
+}
+struct equation *new_equation(void)
+{
+	struct equation *temp_equation;
+	while((temp_equation = (equation *) malloc(sizeof(struct equation))) == NULL)
+		;
+	temp_equation->left_side = new_expression(1);
+	temp_equation->right_side = new_expression(1);
+	garbage_equation[num_equation++] = temp_equation;
+	return temp_equation;
+}
+
+struct polynomial *simplify(struct polynomial *poly)
+{
+	for(int i=0; i<poly->num_elements; i++)
+	{
+		for(int j=i+1; j<poly->num_elements;)
+		{
+			if(poly->elements[i]->exponent == poly->elements[j]->exponent)
+			{
+				poly->elements[i]->coefficient += poly->elements[j]->coefficient;
+				poly = poly_remove_element(poly, j);
+			}
+			else
+				j++;
+		}
+	}
+	return poly;
+}
+
+void sort_elements(struct polynomial *input)
+{
+	for(int i=input->num_elements-1; i>0; i--)
+	{
+		for(int j=0; j<i; j++)
+		{
+			if(input->elements[j]->exponent < input->elements[j+1]->exponent)
+			{
+				struct monomial *temp_mono = input->elements[j];
+				input->elements[j] = input->elements[j+1];
+				input->elements[j+1] = temp_mono;
+			}
+		}
+	}
+	return;
+}
+void sort_elements(struct poly_n_d *input)
+{
+	for(int i=input->num_elements-1; i>0; i--)
+	{
+		for(int j=0; j<i; j++)
+		{
+			if(input->elements[j]->num_elements > input->elements[j+1]->num_elements)
+			{
+				struct polynomial *temp_poly = input->elements[j];
+				input->elements[j] = input->elements[j+1];
+				input->elements[j+1] = temp_poly;
+			}
+		}
+	}
+	for(int i=0; i<input->num_elements; i++)
+		sort_elements(input->elements[i]);
+	return;
+}
+void sort_elements(struct polynomial_fraction *input)
+{
+	sort_elements(input->numerator);
+	sort_elements(input->denominator);
+}
+void sort_elements(struct expression *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+		sort_elements(input->elements[i]);
+}
+struct polynomial *poly_size_fit(struct polynomial *poly)
+{
+	int total_elements = 0;
+	for(int i=0; i<poly->num_elements; i++)
+		if(poly->elements[i] != NULL)
+			total_elements++;
+	struct polynomial *resized = new_poly(total_elements);
+	for(int i=0; i<total_elements; i++)
+		resized->elements[i] = poly->elements[i];
+	return resized;
+}
+
+struct polynomial *mono_to_poly(struct monomial *mono)
+{
+	struct polynomial *temp_poly = (polynomial *) malloc(sizeof(struct polynomial));
+	temp_poly->num_elements = 1;
+	temp_poly->elements[0] = mono;
+	garbage_poly[num_poly++] = temp_poly;
+	return temp_poly;
+}
+struct poly_n_d *poly_to_poly_n_d(struct polynomial *poly)
+{
+	struct poly_n_d *temp_poly_n_d = (poly_n_d *) malloc(sizeof(struct poly_n_d));
+	temp_poly_n_d->num_elements = 1;
+	temp_poly_n_d->elements[0] = poly;
+	garbage_poly_n_d[num_poly_n_d++] = temp_poly_n_d;
+	return temp_poly_n_d;
+}
+struct polynomial_fraction *poly_n_d_to_poly_fract(struct poly_n_d *input)
+{
+	struct polynomial_fraction *temp_poly_fract = new_poly_fract();
+	temp_poly_fract->numerator = input;
+	return temp_poly_fract;
+}
+struct expression *poly_fract_to_expression(struct polynomial_fraction *poly_fract)
+{
+	struct expression *temp_expression = new_expression(1);
+	temp_expression->elements[0] = poly_fract;
+	return temp_expression;
+}
+
+struct polynomial *poly_add_elements(struct polynomial *input, int num_to_add)
+{
+	if(num_to_add == 0)
+		return input;
+	struct polynomial *new_input = new_poly(input->num_elements + num_to_add);
+	for(int i=0; i<input->num_elements; i++)
+	{
+		new_input->elements[i]->coefficient = input->elements[i]->coefficient;
+		new_input->elements[i]->exponent = input->elements[i]->exponent;
+	}
+	return new_input;
+}
+struct poly_n_d *poly_n_d_add_elements(struct poly_n_d *input, int num_to_add)
+{
+	struct poly_n_d *new_input = new_poly_n_d(input->num_elements + num_to_add);
+	for(int i=0; i<input->num_elements; i++)
+	{
+		new_input->elements[i] = copy(input->elements[i]);
+	}
+	return new_input;
+}
+struct expression *expression_add_elements(struct expression *input, int num_to_add)
+{
+	struct expression *new_input = new_expression(input->num_elements + num_to_add);
+	for(int i=0; i<input->num_elements; i++)
+		new_input->elements[i] = input->elements[i];
+	return new_input;
+}
+
+struct polynomial *poly_remove_element(struct polynomial *input, int element_index)
+{
+	struct polynomial *temp_poly = new_poly(input->num_elements - 1);
+	for(int i=0; i<element_index; i++)
+	{
+		temp_poly->elements[i]->coefficient = input->elements[i]->coefficient;
+		temp_poly->elements[i]->exponent = input->elements[i]->exponent;
+	}
+	for(int i=element_index+1; i<input->num_elements; i++)
+	{
+		temp_poly->elements[i-1]->coefficient = input->elements[i]->coefficient;
+		temp_poly->elements[i-1]->exponent = input->elements[i]->exponent;
+	}
+	return temp_poly;
+}
+struct poly_n_d *poly_n_d_remove_element(struct poly_n_d *input, int element_index)
+{
+	struct poly_n_d *temp_poly_n_d = new_poly_n_d(input->num_elements-1);
+	for(int i=0; i<element_index; i++)
+		temp_poly_n_d->elements[i] = input->elements[i];
+	for(int i=element_index+1; i<input->num_elements; i++)
+		temp_poly_n_d->elements[i-1] = input->elements[i];
+	return temp_poly_n_d;
+}
+struct expression *expression_remove_element(struct expression *input, int element_index)
+{
+	struct expression *temp_expression = new_expression(input->num_elements-1);
+	for(int i=0; i<element_index; i++)
+		temp_expression->elements[i] = input->elements[i];
+	for(int i=element_index+1; i<input->num_elements; i++)
+		temp_expression->elements[i-1] = input->elements[i];
+	return temp_expression;
+}
+
+struct polynomial *copy(struct polynomial *source)
+{
+	struct polynomial *temp_poly = new_poly(source->num_elements);
+	for(int i=0; i<source->num_elements; i++)
+	{
+		temp_poly->elements[i]->coefficient = source->elements[i]->coefficient;
+		temp_poly->elements[i]->exponent = source->elements[i]->exponent;
+	}
+	return temp_poly;
+}
+struct poly_n_d *copy(struct poly_n_d *source)
+{
+	struct poly_n_d *temp_poly_n_d = new_poly_n_d(source->num_elements);
+	for(int i=0; i<source->num_elements; i++)
+		temp_poly_n_d->elements[i] = copy(source->elements[i]);
+	return temp_poly_n_d;
+}
+struct polynomial_fraction *copy(struct polynomial_fraction *source)
+{
+	struct polynomial_fraction *temp_poly_fract = new_poly_fract();
+	temp_poly_fract->numerator = copy(source->numerator);
+	temp_poly_fract->denominator = copy(source->denominator);
+	return temp_poly_fract;
+}
+struct expression *copy(struct expression *source)
+{
+	struct expression *temp_expression = new_expression(source->num_elements);
+	for(int i=0; i<source->num_elements; i++)
+		source->elements[i] = copy(source->elements[i]);
+	return temp_expression;
+}
+struct poly_n_d *poly_n_d_merge(struct poly_n_d *input_1, struct poly_n_d *input_2)
+{
+	struct poly_n_d *temp_result;
+	if(input_1->elements[0]->num_elements == 1 && input_2->elements[0]->num_elements == 1)
+	{
+		temp_result = new_poly_n_d(input_1->num_elements + input_2->num_elements - 1);
+		temp_result->elements[0]->elements[0] = mult(input_1->elements[0]->elements[0], input_2->elements[0]->elements[0]);
+		for(int i=1; i<(input_1->num_elements); i++)
+			temp_result->elements[i] = input_1->elements[i];
+		for(int i=1; i<input_2->num_elements; i++)
+			temp_result->elements[i+input_1->num_elements-1] = input_2->elements[i];
+		return temp_result;
+	}
+	else
+	{
+		temp_result = new_poly_n_d(input_1->num_elements + input_2->num_elements);
+		for(int i=0; i<(input_1->num_elements); i++)
+			temp_result->elements[i] = input_1->elements[i];
+		for(int i=0; i<input_2->num_elements; i++)
+			temp_result->elements[i+input_1->num_elements] = input_2->elements[i];
+		return temp_result;
+	}
+
+}
+
+//returns the array index for the first element that can be factored, and -1 if no elements can be factored
+int first_factorable(struct poly_n_d *input) 
+{
+	for(int i=0; i<input->num_elements; i++)
+	{
+		if(can_factor(input->elements[i]))
+			return i;
+	}
+	return -1;
+}
+bool can_factor_bi(struct polynomial *input)
+{
+	if(input->elements[0]->exponent == 1)
+		return false;
+	if(input->elements[0]->exponent % 2 == 0)
+	{
+		if(is_square(input->elements[0]->coefficient))
+			if(is_negative(input->elements[1]->coefficient))
+				if(is_square((-1 *input->elements[1]->coefficient)))
+					return true;
+				else
+					return false;
+			else
+				return false;
+		else
+			return false;
+	}
+	else if(input->elements[0]->exponent % 3 == 0)
+	{
+		if(is_cube(input->elements[0]->coefficient))
+			if(is_cube(input->elements[1]->coefficient))
+				return true;
+	}
+	return false;
+}
+bool can_factor_tri(struct polynomial *input)
+{
+	if(input->elements[0]->exponent - input->elements[1]->exponent != input->elements[1]->exponent - input->elements[2]->exponent)
+		return false;
+	if(is_negative(input->elements[0]->coefficient))
+	{
+		for(int i=input->elements[0]->coefficient; i<=-1 * input->elements[0]->coefficient; i--)
+		{
+			if(i==0)
+				continue;
+			if(input->elements[0]->coefficient % i != 0)
+				continue;
+			if(is_negative(input->elements[2]->coefficient))
+			{
+				for(int j=input->elements[2]->coefficient; j<=-1 * input->elements[2]->coefficient; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(j==0)
+						continue;
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+			else
+			{
+				for(int j=input->elements[2]->coefficient; j>=1; j--)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+				for(int j=-1 * input->elements[2]->coefficient; j<=-1; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+		}
+	}
+	else
+	{
+		for(int i=1; i<=input->elements[0]->coefficient; i++)
+		{
+			if(input->elements[0]->coefficient % i != 0)
+				continue;
+			if(is_negative(input->elements[2]->coefficient))
+			{
+				for(int j=input->elements[2]->coefficient; j<=-1 * input->elements[2]->coefficient; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(j==0)
+						continue;
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+			else
+			{
+				for(int j=input->elements[2]->coefficient; j>=1; j--)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+				for(int j=-1 * input->elements[2]->coefficient; j<=-1; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+		}
+		for(int i=-1; i<=-1 * input->elements[0]->coefficient; i--)
+		{
+			if(input->elements[0]->coefficient % i != 0)
+				continue;
+			if(is_negative(input->elements[2]->coefficient))
+			{
+				for(int j=input->elements[2]->coefficient; j<=-1 * input->elements[2]->coefficient; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(j==0)
+						continue;
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+			else
+			{
+				for(int j=input->elements[2]->coefficient; j>=1; j--)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+				for(int j=-1 * input->elements[2]->coefficient; j<=-1; j++)
+				{
+					log_time();
+					fprintf(log_file, "trying i=%d  j=%d\n", i, j);
+					if(input->elements[2]->coefficient % j != 0)
+						continue;
+					if(j*(input->elements[0]->coefficient/i) + i*(input->elements[2]->coefficient/j) == input->elements[1]->coefficient)
+						return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+bool can_factor(struct polynomial *input)
+{
+#if LOGGING_LEVEL >= 1
+	log_time();
+	fprintf(log_file, "testing ");
+	log_print(input);
+	fprintf(log_file, "for factorability\n");
+#endif
+	switch (input->num_elements)
+	{
+	case 1:
+		return false;
+	case 2:
+		return can_factor_bi(input);
+	case 3:
+		return can_factor_tri(input);
+	default:
+		struct polynomial *temp_poly;
+		struct polynomial *temp_poly_2 = new_poly(2);
+		for(int i=0; i<input->num_elements-1; i++)
+		{
+			for(int j=i+1; j<input->num_elements; j++)
+			{
+				/*
+				int exponent_diff = input->elements[i]->exponent - input->elements[j]->exponent;
+				for(int k=0; k<input->num_elements; k++)
+				{
+					if(k == i || k == j)
+						continue;
+					static int prev_exponent = input->elements[k]->exponent;
+					if(input->elements[k]->exponent == prev_exponent)
+						continue;
+					if(prev_exponent - input->elements[k]->exponent != exponent_diff)
+						goto end_for_2;
+				}
+				/* */
+				temp_poly = copy(input);
+				temp_poly_2->elements[0] = temp_poly->elements[i];
+				temp_poly_2->elements[1] = temp_poly->elements[j];
+				temp_poly = poly_remove_element(temp_poly, i);
+				temp_poly = poly_remove_element(temp_poly, j-1);
+#if LOGGING_LEVEL >= 1
+				log_time();
+				fprintf(log_file, "trying ");
+				log_print(temp_poly_2);
+				fprintf(log_file, " and ");
+				log_print(temp_poly);
+				fprintf(log_file, "\n");
+#endif
+				if(can_factor(temp_poly) && can_factor(temp_poly_2))
+					return true;
+				//end_for_2:;
+			}
+		}
+		if(input->num_elements>=5)
+		{
+			temp_poly_2 = poly_add_elements(temp_poly_2, 1);
+			for(int i=0; i<input->num_elements-2; i++)
+			{
+				for(int j=i+1; j<input->num_elements-1; j++)
+				{
+					for(int k=j+1; k<input->num_elements; k++)
+					{
+						/*
+						int exponent_diff = input->elements[i]->exponent - input->elements[j]->exponent;
+						for(int l=0; l<input->num_elements; l++)
+						{
+							if(l == i || l == j)
+								continue;
+							static int prev_exponent = input->elements[l]->exponent;
+							if(input->elements[l]->exponent == prev_exponent)
+								continue;
+							if(prev_exponent - input->elements[l]->exponent != exponent_diff)
+								goto end_for_3;
+						}
+						/* */
+						temp_poly = copy(input);
+						temp_poly_2->elements[0] = temp_poly->elements[i];
+						temp_poly_2->elements[1] = temp_poly->elements[j];
+						temp_poly_2->elements[2] = temp_poly->elements[k];
+						temp_poly = poly_remove_element(temp_poly, i);
+						temp_poly = poly_remove_element(temp_poly, j-1);
+						temp_poly = poly_remove_element(temp_poly, k-2);
+#if LOGGING_LEVEL >= 1
+						log_time();
+						fprintf(log_file, "trying ");
+						log_print(temp_poly_2);
+						fprintf(log_file, " and ");
+						log_print(temp_poly);
+						fprintf(log_file, "\n");
+#endif
+						if(can_factor(temp_poly) && can_factor(temp_poly_2))
+							return true;
+						//end_for_3:;
+					}
+				}
+			}
+		}
+		return false;
+		break;
+	}
+	return false;
+}
+
+//returns 0 if the inputs are different, otherwise it returns the coefficient of their greatest common monomial factor
+double compare(struct polynomial *poly_1, struct polynomial *poly_2)
+{
+	if(poly_1->num_elements != poly_2->num_elements)
+		return 0;
+	sort_elements(poly_1);
+	sort_elements(poly_2);
+	double coeff_ratio = (double) poly_1->elements[0]->coefficient / (double) poly_2->elements[0]->coefficient;
+	double expon_ratio = (double) poly_1->elements[0]->exponent / (double) poly_2->elements[0]->exponent;
+	for(int i=1; i<poly_1->num_elements; i++)
+	{
+		if(((double) poly_1->elements[i]->coefficient / (double) poly_2->elements[i]->coefficient) != coeff_ratio)
+			return 0;
+		if(((double) poly_1->elements[i]->exponent / (double) poly_2->elements[i]->exponent) != expon_ratio)
+			return 0;
+	}
+	return coeff_ratio;
+}
+
+struct polynomial *add(struct monomial *mono_1, struct monomial *mono_2)
+{
+	struct polynomial *result;
+	if(mono_1->exponent == mono_2->exponent)
+	{
+		struct monomial *temp_mono = new_mono();
+		temp_mono->coefficient = mono_1->coefficient + mono_2->coefficient;
+		temp_mono->exponent = mono_1->exponent;
+		result = (polynomial *) malloc(sizeof(struct polynomial));
+		result->num_elements = 1;
+		result->elements[0] = temp_mono;
+	}
+	else
+	{
+		result = new_poly(2);
+		struct monomial *temp_mono = new_mono();
+		result->num_elements = 2;
+		if(mono_1->exponent > mono_2->exponent)
+		{
+			temp_mono->exponent = mono_1->exponent;
+			temp_mono->coefficient = mono_1->coefficient;
+			result->elements[0] = temp_mono;
+			temp_mono->exponent = mono_2->exponent;
+			temp_mono->coefficient = mono_2->coefficient;
+			result->elements[1] = temp_mono;
+		}
+		else
+		{
+			temp_mono->exponent = mono_2->exponent;
+			temp_mono->coefficient = mono_2->coefficient;
+			result->elements[0] = temp_mono;
+			temp_mono->exponent = mono_1->exponent;
+			temp_mono->coefficient = mono_1->coefficient;
+			result->elements[1] = temp_mono;
+		}
+	}
+	return result;
+}
+struct monomial *mult(struct monomial *mono_1, struct monomial *mono_2)
+{
+	struct monomial *result = new_mono();
+	result->exponent = mono_1->exponent + mono_2->exponent;
+	result->coefficient = mono_1->coefficient * mono_2->coefficient;
+	return result;
+}
+struct polynomial *add(struct polynomial *poly_1, struct polynomial *poly_2)
+{
+	struct polynomial *temp_result;
+	int result_elements = poly_1->num_elements * poly_2->num_elements;
+	temp_result = new_poly(result_elements);
+	int x=0;
+	for(int i=0; i<poly_1->num_elements; i++)
+	{
+		for(int j=0; j<poly_2->num_elements; j++)
+		{
+			struct polynomial *temp_poly = add(poly_1->elements[i], poly_2->elements[j]);
+			temp_result->elements[x] = temp_poly->elements[0];
+			x++;
+			if(poly_1->elements[i]->exponent != poly_2->elements[j]->exponent)
+			{
+				temp_result->elements[x] = temp_poly->elements[1];
+				x++;
+			}
+		}
+	}
+	temp_result = simplify(temp_result);
+	temp_result = poly_size_fit(temp_result);
+	return temp_result;
+}
+struct polynomial *mult(struct polynomial *poly_1, struct polynomial *poly_2)
+{
+	struct polynomial *temp_result;
+	int result_elements = poly_1->num_elements * poly_2->num_elements;
+	temp_result = new_poly(result_elements);
+	int x=0;
+	for(int i=0; i<poly_1->num_elements; i++)
+		for(int j=0; j<poly_2->num_elements; j++)
+			temp_result->elements[x++] = mult(poly_1->elements[i], poly_2->elements[j]);
+	simplify(temp_result);
+	temp_result = poly_size_fit(temp_result);
+	return temp_result;
+}
+struct polynomial_fraction *add(struct polynomial_fraction *fract_1, struct polynomial_fraction *fract_2)
+{
+	struct polynomial_fraction *temp_fract = new_poly_fract();
+	temp_fract->numerator = poly_to_poly_n_d(add(distribute(fract_1->numerator)->elements[0], distribute(fract_2->numerator)->elements[0]));
+	temp_fract->denominator = poly_to_poly_n_d(add(distribute(fract_1->denominator)->elements[0], distribute(fract_2->denominator)->elements[0]));
+	return temp_fract;
+}
+struct expression *add(struct expression *input)
+{
+	struct expression *temp_expression = poly_fract_to_expression(input->elements[0]);
+	for(int i=1; i<input->num_elements-1; i++)
+		temp_expression->elements[0] = add(temp_expression->elements[0], input->elements[i]);
+	return temp_expression;
+}
+struct poly_n_d *distribute(struct poly_n_d *input)
+{
+	if(input->num_elements == 1)
+		return input;
+	struct polynomial *temp_poly = copy(input->elements[0]);
+	for(int i=1; i<input->num_elements; i++)
+		temp_poly = mult(temp_poly, input->elements[i]);
+	return poly_to_poly_n_d(temp_poly);
+}
+
+struct poly_n_d *factor(struct poly_n_d *input)
+{
+#if DEBUG_LEVEL >= 1
+	printf("factoring: ");
+	print(input);
+	printf("\n");
+#endif
+	debug_print(input);
+	log_time();
+	fprintf(log_file, "factoring:");
+	log_print(input);
+	fprintf(log_file, "\n");
+	log_debug_print(input);
+
+	if(input->elements[0]->num_elements == 1 && input->num_elements == 1)
+		return input;
+	struct polynomial *temp_poly;
+	int first_factorable_index = 0;
+	int poly_gcf;
+	int poly_exponent;
+	bool lead_coeff_is_negative;
+	struct polynomial *factorable_poly;
+	if(input->num_elements == 1)
+	{
+		input = poly_n_d_add_elements(input, 1);
+		temp_poly = input->elements[1];
+		input->elements[1] = input->elements[0];
+		input->elements[0] = temp_poly;
+	}
+	else if(input->elements[0]->num_elements > 1)
+	{
+		input = poly_n_d_add_elements(input, 1);
+		for(int i=input->num_elements-1; i>0; i++)
+		{
+			temp_poly = input->elements[i];
+			input->elements[i] = input->elements[i-1];
+			input->elements[i-1] = temp_poly;
+		}
+	}
+
+	for(int i=1; i<input->num_elements; i++)
+	{
+		poly_gcf = gcf(input->elements[i]->elements[0]->coefficient, input->elements[i]->elements[0]->coefficient);
+		for(int j=1; j<input->elements[i]->num_elements; j++)
+			poly_gcf = gcf(poly_gcf, input->elements[i]->elements[j]->coefficient);
+		input->elements[0]->elements[0]->coefficient = poly_gcf;
+		for(int j=0; j<input->elements[i]->num_elements; j++)
+			input->elements[i]->elements[j]->coefficient /= poly_gcf;
+
+		poly_exponent = min(input->elements[i]->elements[0]->exponent, input->elements[i]->elements[0]->exponent);
+		for(int j=1; j<input->elements[i]->num_elements; j++)
+			poly_exponent = min(poly_gcf, input->elements[i]->elements[j]->exponent);
+		input->elements[0]->elements[0]->exponent += poly_exponent;
+		for(int j=0; j<input->elements[i]->num_elements; j++)
+			input->elements[i]->elements[j]->exponent -= poly_exponent;
+	}
+	temp_poly = NULL;
+	sort_elements(input);
+
+	debug_print(input);
+	log_print(input);
+
+	while((first_factorable_index = first_factorable(input)) != -1)
+	{
+		factorable_poly = copy(input->elements[first_factorable_index]);
+
+#if DEBUG_LEVEL >= 1
+		print(factorable_poly);
+		printf("\n");
+		print(input);
+		printf("\n\n");
+#endif
+		log_time();
+		log_print(input);
+		fprintf(log_file, "\n");
+		log_time();
+		fprintf(log_file, "found factorable polynomial: ");
+		log_print(factorable_poly);
+		fprintf(log_file, "\n");
+		input = poly_n_d_remove_element(input, first_factorable_index);
+		switch(factorable_poly->num_elements)
+		{
+		case 2:
+			log_time();
+			fprintf(log_file, "factorable polynomial is binomial\n");
+			input = poly_n_d_add_elements(input, 2);
+			log_time();
+			fprintf(log_file, "done preparations, now factoring: ");
+			log_print(factorable_poly);
+			fprintf(log_file, "\n");
+
+			if(factorable_poly->elements[0]->exponent % 2 == 0)
+			{
+				log_time();
+				fprintf(log_file, "found difference of squares\n");
+				input->elements[input->num_elements-2] = poly_add_elements(input->elements[input->num_elements-2], 1);
+				input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+				input->elements[input->num_elements-2]->elements[0]->coefficient = (int) sqrt((double) factorable_poly->elements[0]->coefficient);
+				input->elements[input->num_elements-2]->elements[1]->exponent = factorable_poly->elements[1]->exponent / 2;
+				input->elements[input->num_elements-2]->elements[1]->coefficient = (int) sqrt((double) -1 * factorable_poly->elements[1]->coefficient);
+				input->elements[input->num_elements-1] = poly_add_elements(input->elements[input->num_elements-1], 1);
+				input->elements[input->num_elements-1]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+				input->elements[input->num_elements-1]->elements[0]->coefficient = (int) sqrt((double) factorable_poly->elements[0]->coefficient);
+				input->elements[input->num_elements-1]->elements[1]->exponent = factorable_poly->elements[1]->exponent / 2;
+				input->elements[input->num_elements-1]->elements[1]->coefficient = -1 * (int) sqrt((double) -1 * factorable_poly->elements[1]->coefficient);
+			}
+			else if(factorable_poly->elements[0]->exponent % 3 == 0)
+			{
+				if(is_negative(factorable_poly->elements[1]->coefficient))
+				{
+					log_time();
+					fprintf(log_file, "found difference of cubes\n");
+					input->elements[input->num_elements-2] = poly_add_elements(input->elements[input->num_elements-2], 1);
+					input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 3;
+					input->elements[input->num_elements-2]->elements[0]->coefficient = (int) cbrt((double) factorable_poly->elements[0]->coefficient);
+					input->elements[input->num_elements-2]->elements[1]->exponent = factorable_poly->elements[1]->exponent / 3;
+					input->elements[input->num_elements-2]->elements[1]->coefficient = (int) cbrt((double) factorable_poly->elements[1]->coefficient);
+					input->elements[input->num_elements-1] = poly_add_elements(input->elements[input->num_elements-1], 2);
+					input->elements[input->num_elements-1]->elements[0]->exponent = (factorable_poly->elements[0]->exponent / 3) * 2;
+					input->elements[input->num_elements-1]->elements[0]->coefficient = (int) pow(cbrt(factorable_poly->elements[0]->coefficient), 2);
+					input->elements[input->num_elements-1]->elements[1]->exponent = factorable_poly->elements[0]->exponent / 3;
+					input->elements[input->num_elements-1]->elements[1]->coefficient = abs((int) (cbrt(factorable_poly->elements[0]->coefficient) * cbrt(factorable_poly->elements[1]->coefficient)));
+					input->elements[input->num_elements-1]->elements[2]->exponent = 0;
+					input->elements[input->num_elements-1]->elements[2]->coefficient = (int) pow(cbrt(factorable_poly->elements[1]->coefficient), 2);
+				}
+				else
+				{
+					log_time();
+					fprintf(log_file, "found sum of cubes\n");
+					input->elements[input->num_elements-2] = poly_add_elements(input->elements[input->num_elements-2], 1);
+					input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 3;
+					input->elements[input->num_elements-2]->elements[0]->coefficient = (int) cbrt((double) factorable_poly->elements[0]->coefficient);
+					input->elements[input->num_elements-2]->elements[1]->exponent = factorable_poly->elements[1]->exponent / 3;
+					input->elements[input->num_elements-2]->elements[1]->coefficient = (int) cbrt((double) factorable_poly->elements[1]->coefficient);
+					input->elements[input->num_elements-1] = poly_add_elements(input->elements[input->num_elements-1], 2);
+					input->elements[input->num_elements-1]->elements[0]->exponent = (factorable_poly->elements[0]->exponent / 3) * 2;
+					input->elements[input->num_elements-1]->elements[0]->coefficient = (int) pow(cbrt(factorable_poly->elements[0]->coefficient), 2);
+					input->elements[input->num_elements-1]->elements[1]->exponent = factorable_poly->elements[0]->exponent / 3;
+					input->elements[input->num_elements-1]->elements[1]->coefficient = -1 * abs((int) (cbrt(factorable_poly->elements[0]->coefficient) * cbrt(factorable_poly->elements[1]->coefficient)));
+					input->elements[input->num_elements-1]->elements[2]->exponent = 0;
+					input->elements[input->num_elements-1]->elements[2]->coefficient = -1 * (int) pow(cbrt(factorable_poly->elements[1]->coefficient), 2);
+				}
+			}
+			log_time();
+			fprintf(log_file, "factored binomial, now have ");
+			log_print(input);
+			fprintf(log_file, "\n");
+
+			break;
+		case 3:
+			fprintf(log_file, "\nfactorable polynomial is a trinomial\n");
+			input = poly_n_d_add_elements(input, 2);
+
+			lead_coeff_is_negative = false;
+			if(is_negative(factorable_poly->elements[0]->coefficient))
+			{
+				lead_coeff_is_negative = true;
+				for(int i=0; i<3; i++)
+					factorable_poly->elements[i]->coefficient *= -1;
+			}
+
+			input->elements[input->num_elements-2] = poly_add_elements(input->elements[input->num_elements-2], 1);
+			input->elements[input->num_elements-1] = poly_add_elements(input->elements[input->num_elements-1], 1);
+			log_time();
+			fprintf(log_file, "done preparations, now factoring: ");
+			log_print(factorable_poly);
+			fprintf(log_file, "\n");
+
+			for(int i=factorable_poly->elements[0]->coefficient; i>=-1 * factorable_poly->elements[0]->coefficient; i--)
+			{
+				if(i==0)
+					continue;
+				if(factorable_poly->elements[0]->coefficient % i != 0)
+					continue;
+				if(is_negative(factorable_poly->elements[2]->coefficient))
+				{
+					for(int j=factorable_poly->elements[2]->coefficient; j<=-1 * factorable_poly->elements[2]->coefficient; j++)
+					{
+						if(j==0)
+							continue;
+						if(factorable_poly->elements[2]->coefficient % j != 0)
+							continue;
+						if(j*(factorable_poly->elements[0]->coefficient/i) + i*(factorable_poly->elements[2]->coefficient/j) == factorable_poly->elements[1]->coefficient)
+						{
+#if LOGGING_LEVEL >= 1
+							log_time();
+							fprintf(log_file, "factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[2]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif
+#if DEBUG_LEVEL >= 1
+							printf("factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[0]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif
+							input->elements[input->num_elements-2]->elements[0]->coefficient = i;
+							input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-2]->elements[1]->coefficient = j;
+							input->elements[input->num_elements-1]->elements[0]->coefficient = factorable_poly->elements[0]->coefficient / i;
+							input->elements[input->num_elements-1]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-1]->elements[1]->coefficient = factorable_poly->elements[2]->coefficient / j;
+							goto done_factoring_tri;
+						}
+					}
+				}
+				else
+				{
+					for(int j=factorable_poly->elements[2]->coefficient; j>=1; j--)
+					{
+						if(factorable_poly->elements[2]->coefficient % j != 0)
+							continue;
+						if(j*(factorable_poly->elements[0]->coefficient/i) + i*(factorable_poly->elements[2]->coefficient/j) == factorable_poly->elements[1]->coefficient)
+						{
+#if LOGGING_LEVEL >= 1
+							log_time();
+							fprintf(log_file, "factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[2]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif
+#if DEBUG_LEVEL >= 1					
+							printf("factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[0]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif	
+							input->elements[input->num_elements-2]->elements[0]->coefficient = i;
+							input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-2]->elements[1]->coefficient = j;
+							input->elements[input->num_elements-1]->elements[0]->coefficient = factorable_poly->elements[0]->coefficient / i;
+							input->elements[input->num_elements-1]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-1]->elements[1]->coefficient = factorable_poly->elements[2]->coefficient / j;
+							goto done_factoring_tri;
+						}
+					}
+					for(int j=-1 * factorable_poly->elements[2]->coefficient; j<=-1; j++)
+					{
+						if(factorable_poly->elements[2]->coefficient % j != 0)
+							continue;
+						if(j*(factorable_poly->elements[0]->coefficient/i) + i*(factorable_poly->elements[2]->coefficient/j) == factorable_poly->elements[1]->coefficient)
+						{
+#if LOGGING_LEVEL >= 1
+							log_time();
+							fprintf(log_file, "factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[2]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif
+#if DEBUG_LEVEL >= 1							
+							printf("factored to: (%d%c^%d + %d)(%d%c^%d + %d)\n", i, variable_char, factorable_poly->elements[0]->exponent/2, j, factorable_poly->elements[0]->coefficient/i, variable_char, factorable_poly->elements[0]->exponent/2, factorable_poly->elements[2]->coefficient/j);
+#endif		
+							input->elements[input->num_elements-2]->elements[0]->coefficient = i;
+							input->elements[input->num_elements-2]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-2]->elements[1]->coefficient = j;
+							input->elements[input->num_elements-1]->elements[0]->coefficient = factorable_poly->elements[0]->coefficient / i;
+							input->elements[input->num_elements-1]->elements[0]->exponent = factorable_poly->elements[0]->exponent / 2;
+							input->elements[input->num_elements-1]->elements[1]->coefficient = factorable_poly->elements[2]->coefficient / j;
+							goto done_factoring_tri;
+						}
+					}
+				}
+			}
+			done_factoring_tri:;
+			break;
+		default:
+#ifndef LONG_POLYS_SUPPORTED
+			printf("Polynomials with four or more elements are currently unsupported. However,\nthis is currently in development and will be in a future version.");
+			break;
+#else
+			temp_poly = new_poly(2);
+			for(int i=0; i<factorable_poly->num_elements-1; i++)
+			{
+				for(int j=i+1; j<factorable_poly->num_elements; j++)
+				{
+					if(can_factor_bi((temp_poly = add(factorable_poly->elements[i], factorable_poly->elements[j]))))
+					{
+						struct polynomial *temp_poly_2 = copy(factorable_poly);
+						temp_poly_2 = poly_remove_element(temp_poly_2, i);
+						temp_poly_2 = poly_remove_element(temp_poly_2, j-1);
+						input = factor(temp_poly);
+						struct poly_n_d *temp_poly_n_d = factor(temp_poly_2);
+						input = poly_n_d_merge(input, temp_poly_n_d);
+						return input;
+					}
+				}
+			}
+			temp_poly = poly_add_elements(temp_poly, 1);
+			for(int i=0; i<factorable_poly->num_elements-2; i++)
+			{
+				for(int j=i+1; j<factorable_poly->num_elements-1; j++)
+				{
+					for(int k=j+1; k<factorable_poly->num_elements; k++)
+					{
+						if(can_factor_tri((temp_poly = add(mono_to_poly(factorable_poly->elements[i]), add(factorable_poly->elements[j], factorable_poly->elements[k])))))
+						{
+							struct polynomial *temp_poly_2 = copy(factorable_poly);
+							temp_poly_2 = poly_remove_element(temp_poly_2, i);
+							temp_poly_2 = poly_remove_element(temp_poly_2, j-1);
+							temp_poly_2 = poly_remove_element(temp_poly_2, k-2);
+							input = factor(temp_poly);
+							struct poly_n_d *temp_poly_n_d = factor(temp_poly_2);
+							input = poly_n_d_merge(input, temp_poly_n_d);
+						}
+					}
+				}
+			}
+			break;
+#endif
+		}
+		sort_elements(input);
+	}
+
+	return input;
+}
+struct poly_n_d *factor(struct polynomial *poly)
+{
+	struct poly_n_d *temp_result;
+	temp_result = poly_to_poly_n_d(poly);
+	temp_result = factor(temp_result);
+	return temp_result;
+}
+struct polynomial_fraction *factor(struct polynomial_fraction *input)
+{
+	input->numerator = factor(input->numerator);
+	input->denominator = factor(input->denominator);
+	return input;
+}
+struct expression *factor(struct expression *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+		input->elements[i] = factor(input->elements[i]);
+	return input;
+}
+struct equation *factor(struct equation *input)
+{
+	input->left_side = factor(input->left_side);
+	input->right_side = factor(input->right_side);
+	return input;
+}
+
+double val(struct monomial *input, double x)
+{
+	return (input->coefficient * pow(x, input->exponent));
+}
+double val(struct polynomial *input, double x)
+{
+	double total_val = 0;
+	for(int i=0; i<input->num_elements; i++)
+		total_val += val(input->elements[i], x);
+	return total_val;
+}
+double val(struct poly_n_d *input, double x)
+{
+	double total_val = 1;
+	for(int i=0; i<input->num_elements; i++)
+		total_val *= val(input->elements[i], x);
+	return total_val;
+}
+double val(struct polynomial_fraction *input, double x)
+{
+	if(val(input->denominator, x) == 0)
+		return (double) 0x0FFFFFFF;
+	return val(input->numerator, x) / val(input->denominator, x);
+}
+double val(struct expression *input, double x)
+{
+	double total_val = 0;
+	for(int i=0; i<input->num_elements; i++)
+		total_val += val(input->elements[i], x);
+	return total_val;
+}
+double val(struct fraction *input)
+{
+	return (double) (input->numerator) / (input->denominator);
+}
+
+double **find_zeros(struct expression *input)
+{
+	log_time();
+	fprintf(log_file, "finding zeros for expression: ");
+	log_print(input);
+	fprintf(log_file, "\n");
+
+	struct expression *temp_expression = add(input);
+	sort_elements(temp_expression->elements[0]);
+
+
+	debug_print(temp_expression);
+	
+
+	int number_of_zeros = temp_expression->elements[0]->numerator->elements[0]->elements[0]->exponent;
+
+	double **zeros = (double **) malloc(sizeof(double **) * (number_of_zeros + 1));
+	for(int i=0; i<=number_of_zeros; i++)
+		zeros[i] = NULL;
+
+	temp_expression->elements[0] = factor(temp_expression->elements[0]);
+
+	int curr_zero = 0;
+	double prev_y = 0;
+	double y = 0;
+	double x = -100;
+	double increment = 1;
+	struct poly_n_d *source = temp_expression->elements[0]->numerator;
+	
+	for(int i=0; i<source->num_elements; i++)
+	{
+		switch(source->elements[i]->num_elements)
+		{
+		case 1:
+			for(int j=0; j<source->elements[i]->elements[0]->exponent; j++)
+			{
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				*(zeros[curr_zero++]) = 0;
+				log_time();
+				fprintf(log_file, "found zero: %g\n", 0);
+			}
+			break;
+		case 2:
+			switch(source->elements[i]->elements[0]->exponent)
+			{
+			case 1:
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient)));
+				break;
+			case 2:
+				if(is_negative(source->elements[i]->elements[1]->coefficient))
+				{
+					zeros[curr_zero] = (double *) malloc(sizeof(double));
+					log_time();
+					fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = sqrt(-1 * (double) (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient))));
+					zeros[curr_zero] = (double *) malloc(sizeof(double));
+					log_time();
+					fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = -1 * sqrt(-1 * (double) (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient))));
+				}
+				break;
+			case 3:
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = cbrt((source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient))));
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = cbrt((source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient))));
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = cbrt((source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient))));
+				break;
+			case 4:
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = (double) sqrt(sqrt((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient)))));
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = (double) sqrt(sqrt((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient)))));
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = -1 * (double) sqrt(sqrt((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient)))));
+				zeros[curr_zero] = (double *) malloc(sizeof(double));
+				log_time();
+				fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = -1 * (double) sqrt(sqrt((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient)))));
+				break;
+			default:
+				if(is_even(source->elements[i]->elements[0]->exponent))
+				{
+					if(is_negative(source->elements[i]->elements[1]->coefficient))
+					{
+						zeros[curr_zero] = (double *) malloc(sizeof(double));
+						log_time();
+						fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = (double) n_root((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient), source->elements[i]->elements[1]->exponent)));
+						zeros[curr_zero] = (double *) malloc(sizeof(double));
+						log_time();
+						fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = -1 * (double) n_root((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient), source->elements[i]->elements[1]->exponent)));
+					}
+					else
+						continue;
+				}
+				else
+				{
+					zeros[curr_zero] = (double *) malloc(sizeof(double));
+					log_time();
+					fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = (double) n_root((long double) -1 * (source->elements[i]->elements[1]->coefficient / source->elements[i]->elements[0]->coefficient), source->elements[i]->elements[1]->exponent)));
+				}
+				break;
+			}
+			break;
+		default:
+			for(x = -100; x<100; x+=increment)
+			{
+				prev_y = y;
+				y = val(source->elements[i], x);
+				if(x == -100)
+					continue;
+				if(y == 0)
+				{
+					increment = 1;
+					zeros[curr_zero] = (double *) malloc(sizeof(double));
+					log_time();
+					fprintf(log_file, "found zero: %g\n", (*(zeros[curr_zero++]) = x));
+					x = (int) x + 1;
+				}
+				else if((prev_y < 0 && y > 0) || (prev_y > 0 && y < 0))
+				{
+					increment *= -0.1;
+				}
+			}
+			break;
+		}
+	}
+	return zeros;
+}
+double **find_holes(struct expression *input)
+{
+	double i, j, NaN;
+	i = (j = 0.0);
+	NaN = i / j;
+	log_time();
+	fprintf(log_file, "finding holes for expression: ");
+	log_print(input);
+	fprintf(log_file, "\n");
+
+	struct expression *temp_expression = add(input);
+	sort_elements(temp_expression->elements[0]);
+
+	debug_print(temp_expression);
+
+	int number_of_holes = temp_expression->elements[0]->numerator->elements[0]->elements[0]->exponent;
+
+	double **holes = (double **) malloc(sizeof(double **) * (number_of_holes + 1));
+	for(int i=0; i<=number_of_holes; i++)
+		holes[i] = NULL;
+
+	temp_expression->elements[0] = factor(temp_expression->elements[0]);
+
+	int curr_hole = 0;
+	double prev_y = 0;
+	double y = 0;
+	double x = -100;
+	double increment = 1;
+	struct polynomial_fraction *source = temp_expression->elements[0];
+
+	for(x = -100; x<100; x+=increment)
+	{
+		prev_y = y;
+		y = val(source, x);
+		if(x == -100)
+			continue;
+		if(y == NaN)
+		{
+			increment = 1;
+			holes[curr_hole] = (double *) malloc(sizeof(double));
+			log_time();
+			fprintf(log_file, "found hole: (%g, %g)\n", (*(holes[curr_hole++]) = x), (val(source->numerator, x+0.0001) + val(source->numerator, x-0.0001) / 2));
+			x = (int) x + 1;
+		}
+		else if((prev_y < 0 && y > 0) || (prev_y > 0 && y < 0))
+		{
+			increment *= -0.1;
+		}
+	}
+
+	return holes;
+}
+
+void print(struct monomial *mono)
+{
+	if(mono->exponent == 0)
+		printf("%d", mono->coefficient);
+	else if(mono->exponent == 1 && (mono->coefficient > 1 || mono->coefficient < -1))
+		printf("%d%c", mono->coefficient, variable_char);
+	else if(mono->exponent == 1 && mono->coefficient == 1)
+		printf("%c", variable_char);
+	else if(mono->coefficient == 1 && mono->exponent > 1)
+		printf("%c^%d", variable_char, mono->exponent);
+	else
+		printf("%d%c^%d", mono->coefficient, variable_char, mono->exponent);
+}
+void print(struct polynomial *poly)
+{
+	if(poly->num_elements == 1)
+	{
+		print(poly->elements[0]);
+	}
+	else
+	{
+		printf("(");
+		print(poly->elements[0]);
+		for(int i=1; i<poly->num_elements; i++)
+		{
+			if(!is_negative(poly->elements[i]->coefficient))
+				printf("+");
+			print(poly->elements[i]);
+		}
+		printf(")");
+	}
+}
+void print(struct poly_n_d *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+	{
+		if(i == 0 && input->elements[0]->num_elements == 1 && input->elements[0]->elements[0]->coefficient == 1 && input->elements[0]->elements[0]->exponent == 0)
+			continue;
+		print(input->elements[i]);
+	}
+}
+void print(struct polynomial_fraction *input)
+{
+	if(input->denominator->num_elements == 1 && input->denominator->elements[0]->num_elements == 1 && input->denominator->elements[0]->elements[0]->coefficient == 1 && input->denominator->elements[0]->elements[0]->exponent == 0)
+	{
+		print(input->numerator);
+	}
+	else
+	{
+		printf("(");
+		print(input->numerator);
+		printf(")/(");
+		print(input->denominator);
+		printf(")");
+	}
+}
+void print(struct expression *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+	{
+		print(input->elements[i]);
+	}
+}
+void print(struct equation *input)
+{
+	print(input->left_side);
+	printf(" = ");
+	print(input->right_side);
+	printf("\n\n\n");
+}
+
+void print_fraction(struct fraction *input)
+{
+	if(input->denominator > 1)
+		printf("(%d/%d)", input->numerator, input->denominator);
+	else
+		printf("%d", input->numerator);
+}
+
+//WARNING: this function frees all memory that it processes before exiting, so DO NOT try to read or write to the pointer that is passed unless reassigned by find_zeros()
+void print_zeros(double **zeros)
+{
+	if(zeros[0] == NULL)
+	{
+		printf("Expression does not cross x-axis");
+		free(zeros);
+		return;
+	}
+	printf("Zeros/solutions: ");
+	for(int i=0; zeros[i] != NULL; i++)
+	{
+		printf("%g, ", *(zeros[i]));
+		free(zeros[i]);
+	}
+	free(zeros);
+	printf("\n");
+}
+
+void debug_print(struct monomial *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("                printing mono\n");
+	printf("                coefficient = %d\n", input->coefficient);
+	printf("                exponent = %d\n", input->exponent);
+#endif
+}
+void debug_print(struct polynomial *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("            printing poly\n");
+	printf("            number of elements = %d\n", input->num_elements);
+	printf("            elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		printf("              element %d:\n", i);
+		debug_print(input->elements[i]);
+	}
+#endif
+}
+void debug_print(struct poly_n_d *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("        printing poly_n_d\n");
+	printf("        number of elements = %d\n", input->num_elements);
+	printf("        elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		printf("          element %d:\n", i);
+		debug_print(input->elements[i]);
+	}
+#endif
+}
+void debug_print(struct polynomial_fraction *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("      printing fraction\n");
+	printf("      numerator:\n");
+	debug_print(input->numerator);
+	printf("      denominator:\n");
+	debug_print(input->denominator);
+#endif
+}
+void debug_print(struct expression *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("  printing expression\n");
+	printf("  number of elements = %d\n", input->num_elements);
+	printf("  elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		printf("    element %d:\n", i);
+		debug_print(input->elements[i]);
+	}
+#endif
+}
+void debug_print(struct equation *input)
+{
+#if DEBUG_LEVEL >= 2
+	printf("left side:\n");
+	debug_print(input->left_side);
+	printf("right side:\n");
+	debug_print(input->right_side);
+	printf("\n\n\n");
+#endif
+}
+
+void log_debug_print(struct monomial *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "                printing mono\n");
+	fprintf(log_file, "                coefficient = %d\n", input->coefficient);
+	fprintf(log_file, "                exponent = %d\n", input->exponent);
+#endif
+}
+void log_debug_print(struct polynomial *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "            printing poly\n");
+	fprintf(log_file, "            number of elements = %d\n", input->num_elements);
+	fprintf(log_file, "            elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		fprintf(log_file, "              element %d:\n", i);
+		log_debug_print(input->elements[i]);
+	}
+#endif
+}
+void log_debug_print(struct poly_n_d *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "        printing poly_n_d\n");
+	fprintf(log_file, "        number of elements = %d\n", input->num_elements);
+	fprintf(log_file, "        elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		fprintf(log_file, "          element %d:\n", i);
+		log_debug_print(input->elements[i]);
+	}
+#endif
+}
+void log_debug_print(struct polynomial_fraction *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "      printing fraction\n");
+	fprintf(log_file, "      numerator:\n");
+	log_debug_print(input->numerator);
+	fprintf(log_file, "      denominator:\n");
+	log_debug_print(input->denominator);
+#endif
+}
+void log_debug_print(struct expression *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "  printing expression\n");
+	fprintf(log_file, "  number of elements = %d\n", input->num_elements);
+	fprintf(log_file, "  elements:\n");
+	for(int i=0; i<input->num_elements; i++)
+	{
+		fprintf(log_file, "    element %d:\n", i);
+		log_debug_print(input->elements[i]);
+	}
+#endif
+}
+void log_debug_print(struct equation *input)
+{
+#if LOGGING_LEVEL >= 2
+	fprintf(log_file, "left side:\n");
+	log_debug_print(input->left_side);
+	fprintf(log_file, "right side:\n");
+	log_debug_print(input->right_side);
+	fprintf(log_file, "\n\n\n");
+#endif
+}
+
+void log_print(struct monomial *mono)
+{
+	if(mono->exponent == 0)
+		fprintf(log_file, "%d", mono->coefficient);
+	else if(mono->exponent == 1 && mono->coefficient > 1)
+		fprintf(log_file, "%d%c", mono->coefficient, variable_char);
+	else if(mono->exponent == 1 && mono->coefficient == 1)
+		fprintf(log_file, "%c", variable_char);
+	else if(mono->coefficient == 1 && mono->exponent > 1)
+		fprintf(log_file, "%c^%d", variable_char, mono->exponent);
+	else
+		fprintf(log_file, "%d%c^%d", mono->coefficient, variable_char, mono->exponent);
+}
+void log_print(struct polynomial *poly)
+{
+	if(poly->num_elements == 1)
+	{
+		log_print(poly->elements[0]);
+	}
+	else
+	{
+		fprintf(log_file, "(");
+		log_print(poly->elements[0]);
+		for(int i=1; i<poly->num_elements; i++)
+		{
+			if(!is_negative(poly->elements[i]->coefficient))
+				fprintf(log_file, "+");
+			log_print(poly->elements[i]);
+		}
+		fprintf(log_file, ")");
+	}
+}
+void log_print(struct poly_n_d *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+	{
+		if(i == 0 && input->elements[0]->num_elements == 1 && input->elements[0]->elements[0]->coefficient == 1 && input->elements[0]->elements[0]->exponent == 0)
+			continue;
+		log_print(input->elements[i]);
+	}
+}
+void log_print(struct polynomial_fraction *input)
+{
+	if(input->denominator->num_elements == 1)
+	{
+		if(input->denominator->elements[0]->num_elements == 1)
+			if(input->denominator->elements[0]->elements[0]->coefficient == 1)
+				if(input->denominator->elements[0]->elements[0]->exponent == 0)
+					log_print(input->numerator);
+	}
+	else
+	{
+		fprintf(log_file, "(");
+		log_print(input->numerator);
+		fprintf(log_file, ")/(");
+		log_print(input->denominator);
+		fprintf(log_file, ")");
+	}
+}
+void log_print(struct expression *input)
+{
+	for(int i=0; i<input->num_elements; i++)
+	{
+		log_print(input->elements[i]);
+	}
+}
+void log_print(struct equation *input)
+{
+	log_print(input->left_side);
+	fprintf(log_file, " = ");
+	log_print(input->right_side);
+	fprintf(log_file, "\n\n\n");
+}
+
+void log_time(void)
+{
+	time_t raw_time;
+	time(&raw_time);
+	curr_time = localtime(&raw_time);
+	fprintf(log_file, "[%d:%d:%d] ", curr_time->tm_hour, curr_time->tm_min, curr_time->tm_sec);
+}
+
+void get_input(char *input_str)
+{
+	while(true)
+	{
+		memset(input_str, '\0', 200);
+		gets_s(input_str, 200);
+		log_time();
+		fprintf(log_file, "Recieved user input: %s\n", input_str);
+		if(!strcmp(input_str, "quit"))
+			exit(EXIT_SUCCESS);
+		else if(!strcmp(input_str, "about"))
+			show_about();
+		else if(!strcmp(input_str, "help"))
+			show_help();
+		else		
+			return;
+	}
+}
+struct equation *parse_input(char input_str[])
+{
+	int length = strlen(input_str);
+	struct equation *input = new_equation();
+	bool has_equals = false;
+	enum{MONOMIAL, POLYNOMIAL, POLY_N_D, POLY_FRACT, EXPRESSION} curr_state = EXPRESSION;
+	for(int curr_index=0; curr_index<length; curr_index++)
+	{
+		if(input_str[curr_index] == '=')
+		{
+			has_equals = true;
+		}
+	}
+	int curr_monomial = 0;
+	int curr_polynomial = 0;
+	int curr_poly_fract = 0;
+	enum{TOP, BOTTOM} curr_fract_part = TOP;
+	bool is_negative = false;
+	enum{COEFFICIENT, EXPONENT} curr_num = COEFFICIENT;
+	char ch;
+	variable_char = 0;
+	int i=0;
+	for(i=0; i<length && input_str[i] != '='; i++)
+	{
+		ch = input_str[i];
+		if(ch == '(')
+		{
+			curr_monomial = 0;
+			if(curr_state == EXPRESSION || curr_state == POLY_FRACT)
+			{
+				for(int j=i+1; j<length; j++)
+				{
+					if(input_str[j] == ')')
+						break;
+					else if(input_str[j] == '(')
+						goto loop_end;
+				}
+			}
+			else
+			{
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator = poly_n_d_add_elements(input->left_side->elements[curr_poly_fract]->numerator, 1);
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator = poly_n_d_add_elements(input->left_side->elements[curr_poly_fract]->denominator, 1);
+				}	
+				curr_polynomial++;
+			}
+			curr_state = POLYNOMIAL;
+		}
+		else if(ch == ')')
+		{
+			if(is_negative)
+			{
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				is_negative = false;
+			}
+			if(curr_state == POLY_N_D)
+				continue;
+			curr_state = POLY_N_D;
+			curr_monomial = 0;
+		}
+		else if(ch == '+')
+		{
+			if(is_negative)
+			{
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				is_negative = false;
+			}
+
+			if(curr_state == MONOMIAL)
+			{
+				curr_num = COEFFICIENT;
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial] = 
+						poly_add_elements(input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial], 1);
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial] = 
+						poly_add_elements(input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial], 1);
+				}
+				curr_monomial++;
+			}
+			else if(curr_state == POLY_N_D)
+			{
+				input->left_side = expression_add_elements(input->left_side, 1);
+				curr_poly_fract++;
+				curr_num = COEFFICIENT;
+				curr_polynomial = 0;
+				curr_fract_part = TOP;
+				curr_monomial = 0;
+			}
+
+		}
+		else if(ch == '-')
+		{
+			if(is_negative)
+			{
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				is_negative = false;
+			}
+
+			if(curr_state == MONOMIAL)
+			{
+				curr_num = COEFFICIENT;
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial] = 
+						poly_add_elements(input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial], 1);
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial] = 
+						poly_add_elements(input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial], 1);					
+				}
+				curr_monomial++;
+				is_negative = true;
+			}
+			else if(curr_state == POLYNOMIAL)
+			{
+				is_negative = true;
+			}
+			else if(curr_state == POLY_N_D)
+			{
+				input->left_side = expression_add_elements(input->left_side, 1);
+				curr_poly_fract++;
+				curr_num = COEFFICIENT;
+				curr_polynomial = 0;
+				curr_fract_part = TOP;
+				curr_monomial;
+				is_negative = true;
+			}
+		}
+		else if(ch == '/')
+		{
+			if(is_negative)
+			{
+				if(curr_fract_part == TOP)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+				}
+				is_negative = false;
+			}
+			if(curr_state == MONOMIAL || curr_state == POLY_N_D)
+				curr_state = POLY_FRACT;
+			curr_monomial = 0;
+			curr_polynomial = 0;
+			curr_fract_part = BOTTOM;
+			input->left_side->elements[curr_poly_fract]->denominator->elements[0]->elements[0]->coefficient = 0;
+			is_negative = false;
+		}
+		else if(ch >= '0' && ch <= '9')
+		{
+			curr_state = MONOMIAL;
+			if(curr_fract_part == TOP)
+			{
+				if(curr_num == COEFFICIENT)
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= 10;
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient += ch - '0';
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= 10;
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent += ch - '0';
+				}
+			}
+			else
+			{
+				if(curr_num == COEFFICIENT)
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= 10;
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient += ch - '0';
+				}
+				else
+				{
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= 10;
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent += ch - '0';
+				}
+			}
+		}
+		else if((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+		{
+			if(ch >= 'a' && ch <= 'z')
+				ch += 'A' - 'a';
+			if(variable_char == 0)
+				variable_char = ch;
+#ifndef MULTI_VAR_SUPPORTED
+			else if(ch != variable_char)
+			{
+				printf("Error: multivariable equations are currently unsupported\n");
+				
+				gets_s(input_str, 200);
+				return parse_input(input_str);
+			}
+#endif
+			if(curr_fract_part == TOP)
+			{
+				if(input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient == 0)
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient = 1;
+				input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent = 1;
+			}
+			else
+			{
+				if(input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient == 0)
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient = 1;
+				input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent = 1;
+			}
+			curr_state = MONOMIAL;
+			curr_num = COEFFICIENT;
+		}
+		else if(ch == '^')
+		{
+			if(!((input_str[i-1] >= 'a' && input_str[i-1] <= 'z') || (input_str[i-1] >= 'A' && input_str[i-1] <= 'Z')))
+			{
+				for(int j=0; j<i; j++)
+					printf(" ");
+				printf("^\n");
+				printf("Error: invalid or unexpected character '%c' at position %d\n", ch, i+1);
+				gets_s(input_str, 200);
+				return parse_input(input_str);
+			}
+			if(curr_state == MONOMIAL || curr_state == POLYNOMIAL)
+			{
+				if(curr_num != COEFFICIENT)
+				{
+					for(int j=0; j<i; j++)
+						printf(" ");
+					printf("^\n");
+					printf("Error: invalid or unexpected character '%c' at position %d\n", ch, i+1);
+					gets_s(input_str, 200);
+					return parse_input(input_str);
+				}
+				if(curr_fract_part == TOP)
+					input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent = 0;
+				else
+					input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent = 0;
+				if(is_negative)
+				{
+					if(curr_fract_part == TOP)
+						input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+					else
+						input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+					is_negative = false;
+				}
+				curr_num = EXPONENT;
+			}
+		}
+		else if(ch == ' ')
+			;
+		else if(ch == '.')
+		{
+#ifndef DECIMALS_SUPPORTED
+			printf("Error: currently does not support decimals\n");
+			gets_s(input_str, 200);
+			return parse_input(input_str);
+#else
+
+#endif
+		}
+		else
+		{
+			for(int j=0; j<i; j++)
+				printf(" ");
+			printf("^\n");
+			printf("Error: invalid or unexpected character at position %d\n", i+1);
+			gets_s(input_str, 200);
+			return parse_input(input_str);
+		}
+		loop_end:;
+	}
+	if(is_negative)
+	{
+		if(curr_fract_part == TOP)
+			if(curr_num == COEFFICIENT)
+				input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+			else
+				input->left_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= -1;
+		else
+			if(curr_num == COEFFICIENT)
+				input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+			else
+				input->left_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= -1;
+	}
+	if(has_equals)
+	{
+#ifndef SUPPORTS_EQUALS
+		printf("Error: currently does not support full equations.\n");
+		gets_s(input_str, 200);
+		return parse_input(input_str);
+#else
+		curr_monomial = 0;
+		curr_polynomial = 0;
+		curr_poly_fract = 0;
+		curr_state = EXPRESSION;
+		curr_num = COEFFICIENT;
+		curr_fract_part = TOP;
+		
+		for(i++; i<length; i++)
+		{
+			ch = input_str[i];
+			if(ch == '(')
+			{
+				if(curr_state == EXPRESSION || curr_state == POLY_FRACT)
+					continue;
+				curr_state = POLYNOMIAL;
+				if(curr_fract_part == TOP)
+				{
+					input->right_side->elements[curr_poly_fract]->numerator = poly_n_d_add_elements(input->right_side->elements[curr_poly_fract]->numerator, 1);
+				}
+				else
+				{
+					input->right_side->elements[curr_poly_fract]->denominator = poly_n_d_add_elements(input->right_side->elements[curr_poly_fract]->denominator, 1);
+				}
+				curr_monomial = 0;
+				curr_polynomial++;
+			}
+			else if(ch == ')')
+			{
+				if(curr_state == POLY_N_D)
+					continue;
+				curr_state = POLY_N_D;
+				curr_monomial = 0;
+			}
+			else if(ch == '+')
+			{
+				if(curr_state == MONOMIAL)
+				{
+					curr_num = COEFFICIENT;
+					if(curr_fract_part == TOP)
+					{
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial] = 
+							poly_add_elements(input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial], 1);
+					}
+					else
+					{
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial] = 
+							poly_add_elements(input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial], 1);
+					}
+					curr_monomial++;
+				}
+				else if(curr_state == POLY_N_D)
+				{
+					input->right_side = expression_add_elements(input->right_side, 1);
+					curr_poly_fract++;
+					curr_num = COEFFICIENT;
+					curr_polynomial = 0;
+					curr_fract_part = TOP;
+					curr_monomial;
+				}
+			}
+			else if(ch == '-')
+			{
+				if(curr_state == MONOMIAL)
+				{
+					curr_num = COEFFICIENT;
+					if(curr_fract_part == TOP)
+					{
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial] = 
+							poly_add_elements(input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial], 1);
+					}
+					else
+					{
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial] = 
+							poly_add_elements(input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial], 1);
+					}
+					curr_monomial++;
+					is_negative = true;
+				}
+				else if(curr_state == POLYNOMIAL)
+				{
+					is_negative = true;
+				}
+				else if(curr_state == POLY_N_D)
+				{
+					input->right_side = expression_add_elements(input->right_side, 1);
+					curr_poly_fract++;
+					curr_num = COEFFICIENT;
+					curr_polynomial = 0;
+					curr_fract_part = TOP;
+					curr_monomial;
+					is_negative = true;
+				}
+
+			}
+			else if(ch == '/')
+			{
+				if(curr_state == MONOMIAL || curr_state == POLY_N_D)
+					curr_state = POLY_FRACT;
+				curr_monomial = 0;
+				curr_polynomial = 0;
+				curr_fract_part = BOTTOM;
+			}
+			else if(ch >= '0' && ch <= '9')
+			{
+				curr_state = MONOMIAL;
+				if(curr_fract_part == TOP)
+				{
+					if(curr_num == COEFFICIENT)
+					{
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= 10;
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient += ch - '0';
+					}
+					else
+					{
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= 10;
+						input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->exponent += ch - '0';
+					}
+				}
+				else
+				{
+					if(curr_num == COEFFICIENT)
+					{
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= 10;
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient += ch - '0';
+					}
+					else
+					{
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent *= 10;
+						input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->exponent += ch - '0';
+					}
+				}
+			}
+			else if((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+			{
+				if(ch >= 'a' && ch <= 'z')
+					ch += 'A' - 'a';
+				if(variable_char == 0)
+					variable_char = ch;
+				
+#ifndef MULTI_VAR_SUPPORTED
+				else if(ch != variable_char)
+				{	
+					printf("Error: multivariable equations are currently unsupported\n");
+				
+					gets_s(input_str, 200);
+					return parse_input(input_str);
+				}
+#endif
+				
+			}
+			else if(ch == '^')
+			{
+				if(curr_state == MONOMIAL || curr_state == POLYNOMIAL)
+				{
+					if(curr_fract_part == TOP)
+					{
+						if(curr_num == COEFFICIENT)
+						{
+							input->right_side->elements[curr_poly_fract]->numerator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+						}
+						else
+						{
+							for(int j=0; j<i; j++)
+								printf(" ");
+							printf("^\n");
+							printf("Error: invalid or unexpected character '%c' at position %d\n", ch, i+1);
+							gets_s(input_str, 200);
+							return parse_input(input_str);
+						}
+					}
+					else
+					{
+						if(curr_num == COEFFICIENT)
+						{
+							input->right_side->elements[curr_poly_fract]->denominator->elements[curr_polynomial]->elements[curr_monomial]->coefficient *= -1;
+						}
+						else
+						{
+							for(int j=0; j<i; j++)
+								printf(" ");
+							printf("^\n");
+							printf("Error: invalid or unexpected character at position %d\n", i+1);
+							gets_s(input_str, 200);
+							return parse_input(input_str);
+						}
+					}
+				}
+			}
+			else if(ch == ' ')
+				;
+			else if(ch == '.')
+			{
+#ifndef DECIMALS_SUPPORTED
+				printf("Error: currently does not support decimals\n");
+				gets_s(input_str, 200);
+				return parse_input(input_str);
+#endif
+			}
+			else
+			{
+				for(int j=0; j<i; j++)
+					printf(" ");
+				printf("^\n");
+				printf("Error: invalid or unexpected character at position %d\n", i+1);
+				gets_s(input_str, 200);
+				return parse_input(input_str);
+			}
+		}
+		for(i=0; i<input->left_side->num_elements; i++)
+		{
+			input->left_side->elements[i]->numerator = poly_n_d_add_elements(input->left_side->elements[i]->numerator, 1);
+			input->left_side->elements[i]->numerator->elements[input->left_side->elements[i]->numerator->num_elements-1]->elements[0]->coefficient = -1;
+		}
+		int k = input->right_side->num_elements;
+		input->right_side = expression_add_elements(input->right_side, input->left_side->num_elements);
+		for(i = k; i < input->right_side->num_elements; i++)
+			input->right_side->elements[i] = input->left_side->elements[i-k];
+		input->left_side = new_expression(1);
+#endif
+	}
+
+	debug_print(input);
+	log_time();
+	fprintf(log_file, "done parsing input, ended up with:");
+	log_print(input);
+	log_debug_print(input);
+	return input;
+}
+
+void show_help(void)
+{
+	printf("Format for entering an equation to solve:\n"
+		"  Coefficients and exponents must be integers, and only coefficients can be\n"
+		"     negative\n"
+		"  Single polynomials can be enclosed in parentheses, but do not have to be\n"
+		"  Rational fractions should not have parentheses enclosing the numerator\n"
+		"     and/or the denominator. if included, the program will simply ignore\n"
+		"     them.\n"
+		"  Variables can be denoted with any letter, and is not case-sensitive. Note\n"
+		"     that when it displays the factored equation, the variable will be\n"
+		"     capitalized\n"
+		"  If a variable has an exponent, use the form x^2 (x squared)\n"
+		"  Coefficients should be directly next to the variable, e.g.: 3x\n"
+		"  If an expression consists of multiple rational fractions, all of them\n"
+		"     (except the last) must have the last written element enclosed in\n"
+		"     parentheses\n"
+		"  Example inputs:\n"
+		"          4(3x-4)   \n"
+		"  x + --------------   becomes (x) + 4(3x-4)/(5x+2)(6x^3-8)\n"
+		"      (5x+2)(2x^3-8)\n\n\n"
+		);
+}
+void show_about(void)
+{
+	printf(
+		"Designed, written, and tested by Trey Stevens\n"
+		"Send me any questions, comments, or bug reports at treystevens00@gmail.com\n"
+		"When sending bug reports, be sure to include the LogFile.txt located in the\n"
+		" same folder as the program's .exe file, as well as what the error message is\n\n\n"
+		);
+}
